@@ -6,6 +6,12 @@ export async function listGames(): Promise<ImportedGame[]> {
   return invoke<ImportedGame[]>("list_games");
 }
 
+export type DetectedGame = Pick<ImportedGame, "id" | "title">;
+
+export async function detectRunningGame(): Promise<DetectedGame | null> {
+  return invoke<DetectedGame | null>("detect_running_game");
+}
+
 export async function importGameFromPath(path: string): Promise<ImportedGame> {
   return invoke<ImportedGame>("import_game", { path });
 }

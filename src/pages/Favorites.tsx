@@ -1,41 +1,58 @@
-import { useOutletContext } from "react-router-dom";
-import { SectionHeader } from "../components/common/SectionHeader";
-import { GameGrid } from "../components/games/GameGrid";
+import { FolderPlus, Heart, Library as LibraryIcon } from "lucide-react";
+import { Link, useOutletContext } from "react-router-dom";
+import { Button, buttonClasses } from "../components/common/Button";
+import { EmptyState } from "../components/common/EmptyState";
+import { PageHeader } from "../components/common/PageHeader";
+import { GameGrid, GameGridSkeleton } from "../components/games/GameGrid";
 import type { LayoutContext } from "../components/layout/MainLayout";
 
 export function Favorites() {
-  const { addGame, games, search } = useOutletContext<LayoutContext>();
+  const { addGame, games, isLibraryLoading, search } = useOutletContext<LayoutContext>();
   const normalizedSearch = search.trim().toLowerCase();
-  const favoriteGames = games.filter(
-    (game) =>
-      game.favorite &&
-      `${game.title} ${game.executableFilename} ${game.genre ?? ""}`
-        .toLowerCase()
-        .includes(normalizedSearch),
+  const allFavorites = games.filter((game) => game.favorite);
+  const favoriteGames = allFavorites.filter((game) =>
+    `${game.title} ${game.executableFilename} ${game.genre ?? ""}`.toLowerCase().includes(normalizedSearch),
   );
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-4xl font-bold text-white">Favorites</h1>
-        <p className="mt-2 text-slate-400">Your pinned games and likely QuestAI targets.</p>
-      </header>
-      <section>
-        <SectionHeader title="Favorite Games" />
-        {games.length === 0 ? (
-          <div className="rounded-lg border border-line bg-card p-8 text-center text-slate-400">
-            Import a game before marking favorites.
-            <button
-              className="ml-2 font-semibold text-accent hover:text-teal-200"
-              onClick={addGame}
-            >
-              Add Game
-            </button>
-          </div>
-        ) : (
-          <GameGrid games={favoriteGames} />
-        )}
-      </section>
+      <PageHeader
+        eyebrow="Favorites"
+        title="Favorites"
+        description={
+          allFavorites.length
+            ? `${allFavorites.length} pinned ${allFavorites.length === 1 ? "game" : "games"}, ready to launch.`
+            : "Pin the games you play most so they are one click away."
+        }
+      />
+
+      {isLibraryLoading ? (
+        <GameGridSkeleton />
+      ) : games.length === 0 ? (
+        <EmptyState
+          icon={FolderPlus}
+          title="Your library is empty"
+          description="Import a game before marking favorites."
+          actions={
+            <Button onClick={addGame}>
+              <FolderPlus className="h-4 w-4" /> Add Game
+            </Button>
+          }
+        />
+      ) : allFavorites.length === 0 ? (
+        <EmptyState
+          icon={Heart}
+          title="No favorites yet"
+          description="Open any game and select Favorite to pin it here."
+          actions={
+            <Link className={buttonClasses("secondary")} to="/library">
+              <LibraryIcon className="h-4 w-4" /> Browse Library
+            </Link>
+          }
+        />
+      ) : (
+        <GameGrid games={favoriteGames} />
+      )}
     </div>
   );
 }

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "guide-overlay",
+  "description": "Capability for the in-game guide overlay window. set-position powers the pointer-based title bar drag in GuideOverlay.",
+  "windows": ["guide-overlay"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-position"
+  ]
+}
