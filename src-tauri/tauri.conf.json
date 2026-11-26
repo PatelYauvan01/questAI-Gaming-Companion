@@ -19,6 +19,23 @@
         "minHeight": 680,
         "resizable": true,
         "maximized": false
+      },
+      {
+        "label": "guide-overlay",
+        "title": "QuestAI Guide",
+        "url": "index.html?overlay=1",
+        "width": 440,
+        "height": 620,
+        "minWidth": 380,
+        "minHeight": 520,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

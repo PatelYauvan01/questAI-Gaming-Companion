@@ -8,6 +8,109 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use sysinfo::System;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectedGame {
+    id: String,
+    title: String,
+}
+
+#[tauri::command]
+fn detect_running_game(app: AppHandle) -> Result<Option<DetectedGame>, String> {
+    let library = read_library(&app)?;
+    let system = System::new_all();
+    let windows_root = std::env::var("WINDIR")
+        .unwrap_or_else(|_| "C:\\Windows".to_string())
+        .replace('/', "\\")
+        .to_lowercase();
+    let desktop_processes = [
+        "amazon games.exe", "applicationframehost.exe", "backgroundtaskhost.exe",
+        "battle.net.exe", "battlenet.exe", "browser_broker.exe", "cargo.exe", "cmd.exe", "code.exe", "conhost.exe",
+        "crashpad_handler.exe", "discord.exe", "dwm.exe", "eaapp.exe",
+        "devenv.exe", "epicgameslauncher.exe", "epicwebhelper.exe", "explorer.exe",
+        "gamebar.exe", "gamebarftserver.exe", "git.exe", "goggalaxy.exe", "googlechrome.exe",
+        "itch.exe", "msedge.exe", "msedgewebview2.exe", "node.exe", "obs64.exe", "onedrive.exe",
+        "powershell.exe", "pwsh.exe", "questai.exe", "riotclientservices.exe", "rustc.exe", "searchhost.exe",
+        "services.exe", "slack.exe", "startmenuexperiencehost.exe", "steam.exe",
+        "steamwebhelper.exe", "taskmgr.exe", "textinputhost.exe", "ubisoftconnect.exe",
+        "windowsterminal.exe", "widgets.exe", "widgetservice.exe", "xboxapp.exe",
+    ];
+
+    let mut candidates: Vec<_> = system
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let path = process.exe()?;
+            let path_text = path.to_string_lossy().to_string();
+            let normalized = path_text.replace('/', "\\").to_lowercase();
+            let filename = path.file_name()?.to_string_lossy().to_string();
+            let filename_lower = filename.to_lowercase();
+
+            if desktop_processes.contains(&filename_lower.as_str())
+                || filename_lower.contains("crash")
+                || filename_lower.contains("unitycrash")
+                || filename_lower.starts_with("unins")
+            {
+                return None;
+            }
+
+            let library_match = library.iter().find(|game| {
+                game.executable_path.eq_ignore_ascii_case(&path_text)
+            });
+            let steam_game = normalized.contains("\\steamapps\\common\\");
+            let outside_windows = !normalized.starts_with(&windows_root);
+            let score = if library_match.is_some() {
+                3
+            } else if steam_game {
+                2
+            } else if outside_windows {
+                1
+            } else {
+                return None;
+            };
+            let (id, title) = if let Some(game) = library_match {
+                (game.id.clone(), game.title.clone())
+            } else {
+                let title = path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !["bin", "binaries", "game", "shipping", "win64", "x64", "x86"].contains(&name.to_lowercase().as_str()))
+                    .map(|name| name.replace(['_', '-'], " "))
+                    .unwrap_or_else(|| title_from_path(path).unwrap_or_else(|_| "Running game".to_string()));
+                (format!("running:{}", normalized), title)
+            };
+            Some((score, process.start_time(), id, title))
+        })
+        .collect();
+
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    Ok(candidates.into_iter().next().map(|(_, _, id, title)| DetectedGame { id, title }))
+}
+
+#[tauri::command]
+fn hide_guide_overlay(app: AppHandle) -> Result<(), String> {
+    app.get_webview_window("guide-overlay")
+        .ok_or_else(|| "Guide overlay window is unavailable.".to_string())?
+        .hide()
+        .map_err(|error| format!("Could not hide guide overlay: {error}"))
+}
+
+#[tauri::command]
+fn show_guide_overlay(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("guide-overlay")
+        .ok_or_else(|| "Guide overlay window is unavailable.".to_string())?;
+    window
+        .show()
+        .map_err(|error| format!("Could not show guide overlay: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("Could not focus guide overlay: {error}"))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -458,6 +561,29 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyQ)
+                        && event.state() == ShortcutState::Pressed
+                    {
+                        if let Some(window) = app.get_webview_window("guide-overlay") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
+        .setup(|app| {
+            let shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyQ);
+            app.global_shortcut().register(shortcut)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_games,
             import_game,
@@ -465,7 +591,10 @@ pub fn run() {
             remove_game,
             update_game,
             ai_guide::ask_game_guide,
-            launch_game
+            detect_running_game,
+            launch_game,
+            show_guide_overlay,
+            hide_guide_overlay
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

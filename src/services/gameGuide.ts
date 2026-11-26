@@ -25,6 +25,14 @@ export async function askGameGuide(
   });
 }
 
+export async function showGuideOverlay(): Promise<void> {
+  return invoke("show_guide_overlay");
+}
+
+export async function hideGuideOverlay(): Promise<void> {
+  return invoke("hide_guide_overlay");
+}
+
 export function getSuggestedQuestions(gameTitle: string): string[] {
   const title = gameTitle.trim();
   const normalized = title.toLowerCase();

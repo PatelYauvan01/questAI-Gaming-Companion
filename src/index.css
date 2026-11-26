@@ -2,12 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The in-game overlay's styles live in ./styles/overlay.css (imported from main.tsx). */
+
 :root {
-  color: #f6f8fb;
-  background: #090b10;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  color: #eef2f7;
+  background: #07090d;
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -28,37 +30,79 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(circle at top left, rgba(45, 212, 191, 0.08), transparent 28rem),
-    #090b10;
+  background: #07090d;
+}
+
+::selection {
+  color: #032a25;
+  background: #5eead4;
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible {
+/* One focus ring everywhere; only for keyboard users. */
+:focus-visible {
   outline: 2px solid #2dd4bf;
   outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 ::-webkit-scrollbar {
   width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  background: #0f131b;
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #2a3443;
-  border: 2px solid #0f131b;
+  background: #232c38;
+  border: 3px solid transparent;
   border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #33404f;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #3d4b5f;
+@layer components {
+  /* Generic surface used by cards and panels across the app. */
+  .surface {
+    @apply rounded-xl border border-line bg-card shadow-card;
+  }
+
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-[0.16em] text-accent;
+  }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-b-2 border-line-strong bg-white/[0.04] px-1.5 text-2xs font-semibold text-ink-2;
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.035) 25%, rgba(255, 255, 255, 0.075) 50%, rgba(255, 255, 255, 0.035) 75%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded-lg;
+  }
+
+  .field {
+    @apply h-10 w-full rounded-lg border border-line bg-panel px-3 text-sm text-ink-1 transition duration-150 placeholder:text-ink-3 hover:border-line-strong focus:border-accent/70 focus:outline-none focus:ring-4 focus:ring-accent/10;
+  }
+}
+
+/* Respect reduced motion across the whole app (the overlay has its own rule too). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

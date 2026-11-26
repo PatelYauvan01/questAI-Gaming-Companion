@@ -1,110 +1,62 @@
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { Heart, Send, Sparkles, Trash2, X } from "lucide-react";
+import {
+  ArrowUp, CalendarDays, FileCode2, Heart, Loader2, PanelsTopLeft, Play, RotateCcw, Sparkles, Trash2,
+} from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { Button } from "../components/common/Button";
-import { GameBadge } from "../components/games/GameBadge";
+import { Notice } from "../components/common/Notice";
+import { FormattedGuideText } from "../components/guide/FormattedGuideText";
 import { GameArtwork } from "../components/games/GameArtwork";
+import { GameBadge } from "../components/games/GameBadge";
 import type { LayoutContext } from "../components/layout/MainLayout";
-import { askGameGuide, getSuggestedQuestions, type GuideMessage } from "../services/gameGuide";
-import { removeGame, launchGame } from "../services/gameLibrary";
+import { askGameGuide, getSuggestedQuestions, showGuideOverlay, type GuideMessage } from "../services/gameGuide";
+import { launchGame, removeGame } from "../services/gameLibrary";
 
-// function formatDate(timestamp: number) {
-//   return new Intl.DateTimeFormat(undefined, {
-//     dateStyle: "medium",
-//     timeStyle: "short",
-//   }).format(new Date(timestamp));
-// }
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
-function formatAssistantText(text: string) {
-  const blocks = text.split(/\n{2,}/).filter((block) => block.trim().length > 0);
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  return blocks.map((block, blockIndex) => {
-    const lines = block.split("\n").map((line) => line.trimEnd());
-    const numListMatch = lines.every((line) => /^\d+\.\s/.test(line));
-    const bulletListMatch = lines.every((line) => /^[-*]\s/.test(line));
-
-    const content = lines.map((line, lineIndex) => {
-      if (/^\d+\.\s/.test(line)) {
-        return (
-          <li key={`${blockIndex}-${lineIndex}`} className="mb-2 ml-6 list-decimal text-slate-200">
-            {line.replace(/^\d+\.\s/, "")}
-          </li>
-        );
-      }
-      if (/^[-*]\s/.test(line)) {
-        return (
-          <li key={`${blockIndex}-${lineIndex}`} className="mb-2 ml-6 list-disc text-slate-200">
-            {line.replace(/^[-*]\s/, "")}
-          </li>
-        );
-      }
-
-      return (
-        <p key={`${blockIndex}-${lineIndex}`} className="mb-2 text-slate-200">
-          {line
-            .split(/(\*\*.*?\*\*|`[^`]+`)/g)
-            .filter(Boolean)
-            .map((segment, segmentIndex) => {
-              if (segment.startsWith("**") && segment.endsWith("**")) {
-                return (
-                  <strong key={`${blockIndex}-${lineIndex}-${segmentIndex}`} className="font-semibold text-white">
-                    {segment.slice(2, -2)}
-                  </strong>
-                );
-              }
-              if (segment.startsWith("`") && segment.endsWith("`")) {
-                return (
-                  <code key={`${blockIndex}-${lineIndex}-${segmentIndex}`} className="rounded bg-slate-800 px-1 py-0.5 text-teal-200">
-                    {segment.slice(1, -1)}
-                  </code>
-                );
-              }
-              return <span key={`${blockIndex}-${lineIndex}-${segmentIndex}`}>{segment}</span>;
-            })}
-        </p>
-      );
-    });
-
-    if (numListMatch) {
-      return <ol key={blockIndex}>{content}</ol>;
-    }
-    if (bulletListMatch) {
-      return <ul key={blockIndex}>{content}</ul>;
-    }
-    return <div key={blockIndex}>{content}</div>;
-  });
+function DetailsSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading game details">
+      <div className="skeleton h-[340px] rounded-2xl" />
+      <div className="skeleton h-[420px] rounded-xl" />
+    </div>
+  );
 }
 
 export function GameDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const {
-    games,
-    isLibraryLoading,
-    replaceGames,
-    setLibraryError,
-    updateLibraryGame,
-  } = useOutletContext<LayoutContext>();
+  const { games, isLibraryLoading, replaceGames, setLibraryError, updateLibraryGame } =
+    useOutletContext<LayoutContext>();
   const game = useMemo(() => games.find((item) => item.id === id), [games, id]);
-  // const [isSaving, setIsSaving] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<GuideMessage[]>([]);
   const [isGuideLoading, setIsGuideLoading] = useState(false);
   const [guideError, setGuideError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const suggestedQuestions = useMemo(() => getSuggestedQuestions(game?.title ?? ""), [game?.title]);
 
   useEffect(() => {
-    setLaunchError(null);
+    setActionError(null);
     setMessages([]);
     setGuideError(null);
     setQuestion("");
     setIsPlaying(false);
+  }, [game?.id]);
+
+  // The overlay opens on whichever game was viewed last.
+  useEffect(() => {
+    if (game?.id) localStorage.setItem("questai.active-game", game.id);
   }, [game?.id]);
 
   useEffect(() => {
@@ -112,11 +64,7 @@ export function GameDetails() {
   }, [messages, isGuideLoading]);
 
   if (isLibraryLoading) {
-    return (
-      <div className="rounded-lg border border-line bg-card p-8 text-center text-slate-400">
-        Loading game details...
-      </div>
-    );
+    return <DetailsSkeleton />;
   }
 
   if (!game) {
@@ -124,50 +72,45 @@ export function GameDetails() {
   }
 
   async function handleFavorite() {
-    if (!game) {
-      return;
-    }
-
+    if (!game) return;
     try {
       await updateLibraryGame(game.id, { favorite: !game.favorite });
       setLibraryError(null);
     } catch (error) {
-      setLibraryError(error instanceof Error ? error.message : String(error));
+      setLibraryError(errorText(error));
     }
   }
 
   async function handleLaunch() {
     if (!game) return;
     setIsLaunching(true);
-    setLaunchError(null);
+    setActionError(null);
     try {
       const pid = await launchGame(game.executablePath);
-      if (pid && pid > 0) {
-        console.log(`Launched game pid=${pid}`);
-        setIsPlaying(true);
-      } else {
-        console.warn("launch_game returned no pid");
-      }
+      if (pid && pid > 0) setIsPlaying(true);
     } catch (error) {
-      setLaunchError(error instanceof Error ? error.message : String(error));
+      setActionError(errorText(error));
     } finally {
       setIsLaunching(false);
     }
   }
 
-  async function handleRemove() {
-    if (!game) {
-      return;
+  async function handleOpenOverlay() {
+    setActionError(null);
+    try {
+      await showGuideOverlay();
+    } catch (error) {
+      setActionError(errorText(error));
     }
+  }
 
+  async function handleRemove() {
+    if (!game) return;
     const shouldRemove = await confirm(
       `Remove "${game.title}" from QuestAI? This will only delete QuestAI metadata and will not touch the game files.`,
       { title: "Remove from Library", kind: "warning" },
     );
-
-    if (!shouldRemove) {
-      return;
-    }
+    if (!shouldRemove) return;
 
     setIsRemoving(true);
     try {
@@ -176,27 +119,18 @@ export function GameDetails() {
       setLibraryError(null);
       navigate("/library");
     } catch (error) {
-      setLibraryError(error instanceof Error ? error.message : String(error));
+      setLibraryError(errorText(error));
     } finally {
       setIsRemoving(false);
     }
   }
 
-  async function handleAskGuide(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    if (!game) {
-      return;
-    }
+  async function ask(prompt: string) {
+    if (!game) return;
+    const trimmed = prompt.trim();
+    if (!trimmed || isGuideLoading) return;
 
-    const trimmed = question.trim();
-
-    if (!trimmed || isGuideLoading) {
-      return;
-    }
-
-    const nextQuestion = trimmed;
-    const userMessage: GuideMessage = { role: "user", text: nextQuestion };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages: GuideMessage[] = [...messages, { role: "user", text: trimmed }];
     setMessages(nextMessages);
     setQuestion("");
     setGuideError(null);
@@ -205,24 +139,22 @@ export function GameDetails() {
     try {
       const response = await askGameGuide({
         gameTitle: game.title,
-        question: nextQuestion,
+        question: trimmed,
         recentConversation: nextMessages,
       });
-
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        { role: "assistant", text: response.answer },
-      ]);
+      setMessages((currentMessages) => [...currentMessages, { role: "assistant", text: response.answer }]);
     } catch (error) {
-      setGuideError(error instanceof Error ? error.message : String(error));
+      setGuideError(errorText(error));
       setMessages(nextMessages);
     } finally {
       setIsGuideLoading(false);
+      inputRef.current?.focus();
     }
   }
 
-  function handleSuggestedQuestion(prompt: string) {
-    setQuestion(prompt);
+  function handleAskGuide(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    void ask(question);
   }
 
   function clearConversation() {
@@ -231,161 +163,232 @@ export function GameDetails() {
     setQuestion("");
   }
 
+  const hasConversation = messages.length > 0 || isGuideLoading;
+
   return (
-    <div className="space-y-7">
-      <section className="grid overflow-hidden rounded-lg border border-line bg-card lg:grid-cols-[1fr_1.05fr]">
-        <GameArtwork game={game} className="min-h-[380px]" />
-        <div className="flex flex-col justify-between gap-8 p-8">
-          <div>
-            <div className="mb-4 flex flex-wrap gap-2">
-              <GameBadge>{game.genre || "Uncategorized"}</GameBadge>
-              <GameBadge>{game.executableFilename}</GameBadge>
-              <GameBadge>Imported</GameBadge>
+    <div className="space-y-6">
+      {/* Hero */}
+      <section className="relative isolate overflow-hidden rounded-2xl border border-line bg-card shadow-card">
+        <GameArtwork compact className="absolute inset-0 -z-20 scale-110 opacity-60 blur-2xl saturate-150" game={game} />
+        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-r from-card via-card/90 to-card/60" />
+        <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:p-6">
+          <GameArtwork
+            compact
+            className="aspect-[16/10] rounded-xl border border-white/10 shadow-lift lg:aspect-auto lg:min-h-[300px]"
+            game={game}
+          />
+          <div className="flex min-w-0 flex-col justify-between gap-6 py-1">
+            <div className="min-w-0">
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                <GameBadge tone="accent">
+                  <Sparkles className="h-3 w-3" /> Guide ready
+                </GameBadge>
+                <GameBadge>{game.genre || "Uncategorized"}</GameBadge>
+                {game.favorite ? (
+                  <GameBadge>
+                    <Heart className="h-3 w-3 fill-current text-accent" /> Favorite
+                  </GameBadge>
+                ) : null}
+              </div>
+              <h1 className="break-words text-4xl font-semibold tracking-tight text-white xl:text-5xl">{game.title}</h1>
+              <p className="mt-3 max-w-2xl text-[15px] leading-7 text-ink-2">
+                {game.description || "Ask the AI guide below for strategies, objectives, and mechanics, or open the overlay while you play."}
+              </p>
+              <dl className="mt-5 grid gap-x-6 gap-y-2 text-xs text-ink-3 sm:grid-cols-2">
+                <div className="flex min-w-0 items-center gap-2" title={game.executablePath}>
+                  <FileCode2 className="h-3.5 w-3.5 shrink-0" />
+                  <dt className="sr-only">Executable</dt>
+                  <dd className="truncate">{game.executableFilename}</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                  <dt className="sr-only">Imported</dt>
+                  <dd>Added {dateFormat.format(new Date(game.importDate))}</dd>
+                </div>
+              </dl>
             </div>
-            <h1 className="break-words text-5xl font-bold text-white">{game.title}</h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
-              {game.description ||
-                "No description yet. Edit the details below to add your own notes."}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={handleFavorite} variant="secondary">
-              <Heart
-                className={`h-4 w-4 ${game.favorite ? "fill-accent text-accent" : ""}`}
-              />
-              {game.favorite ? "Favorited" : "Favorite"}
-            </Button>
-            <Button disabled={isRemoving} onClick={handleRemove} variant="secondary">
-              <Trash2 className="h-4 w-4" /> Remove from Library
-            </Button>
-            <Button
-              className="ml-2"
-              onClick={() => void handleLaunch()}
-              disabled={isLaunching || isPlaying}
-              variant="secondary"
-            >
-              {isPlaying ? "Playing" : isLaunching ? "Launching..." : "Play"}
-            </Button>
-            {launchError ? (
-              <div className="w-full mt-2 text-sm text-red-400">{launchError}</div>
-            ) : null}
+
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button disabled={isLaunching || isPlaying} onClick={() => void handleLaunch()} size="lg">
+                  {isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+                  {isPlaying ? "Playing" : isLaunching ? "Launching…" : "Play"}
+                </Button>
+                <Button
+                  onClick={() => void handleOpenOverlay()}
+                  size="lg"
+                  title="Toggle anytime with Alt+Shift+Q"
+                  variant="secondary"
+                >
+                  <PanelsTopLeft className="h-4 w-4" /> Guide Overlay
+                </Button>
+                <Button
+                  aria-pressed={game.favorite}
+                  onClick={() => void handleFavorite()}
+                  size="lg"
+                  variant="secondary"
+                >
+                  <Heart
+                    className={`h-4 w-4 transition-transform duration-200 ${game.favorite ? "scale-110 fill-accent text-accent" : ""}`}
+                  />
+                  {game.favorite ? "Favorited" : "Favorite"}
+                </Button>
+                <Button
+                  className="ml-auto"
+                  disabled={isRemoving}
+                  onClick={() => void handleRemove()}
+                  size="lg"
+                  title="Remove from library (game files are not touched)"
+                  variant="danger"
+                >
+                  <Trash2 className="h-4 w-4" /> {isRemoving ? "Removing…" : "Remove"}
+                </Button>
+              </div>
+              {actionError ? <Notice onDismiss={() => setActionError(null)}>{actionError}</Notice> : null}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="rounded-lg border border-line bg-card p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
-              <Sparkles className="h-5 w-5" />
+      {/* AI guide */}
+      <section className="surface flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-accent/25 bg-accent/10 text-accent">
+              <Sparkles className="h-[18px] w-[18px]" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">AI Game Guide</h2>
-              <p className="text-sm text-slate-400">Ask about {game.title}</p>
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-semibold text-ink-1">AI Game Guide</h2>
+              <p className="truncate text-xs text-ink-3">Strategies, objectives, and mechanics for {game.title}</p>
             </div>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+          <Button
+            disabled={messages.length === 0 && !guideError && !question}
             onClick={clearConversation}
-            type="button"
+            size="sm"
+            variant="ghost"
           >
-            <X className="h-3.5 w-3.5" /> Clear
-          </button>
+            <RotateCcw className="h-3.5 w-3.5" /> New chat
+          </Button>
         </div>
 
-        <div className="mb-4 rounded-xl border border-line bg-black/20 p-3">
-          <p className="text-sm text-slate-300">
-            Welcome to the QuestAI guide for <strong className="font-semibold text-white">{game.title}</strong>. Ask a question and I’ll help with the next step.
-          </p>
-        </div>
-
-        <div className="mb-4 grid gap-2 md:grid-cols-2">
-          {suggestedQuestions.map((prompt) => (
-            <button
-              key={prompt}
-              className="rounded-lg border border-line bg-white/5 px-3 py-2 text-left text-sm text-slate-200 transition hover:border-slate-500 hover:bg-white/10"
-              onClick={() => handleSuggestedQuestion(prompt)}
-              type="button"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-
-        <div ref={scrollRef} className="max-h-[430px] space-y-3 overflow-y-auto rounded-xl border border-line bg-black/15 p-3">
-          {messages.length === 0 && !isGuideLoading ? (
-            <div className="rounded-lg border border-dashed border-line bg-white/5 p-4 text-sm text-slate-400">
-              No guide messages yet. Ask your first question about {game.title}.
+        <div
+          aria-live="polite"
+          className="max-h-[460px] min-h-[220px] space-y-4 overflow-y-auto px-5 py-5"
+          ref={scrollRef}
+        >
+          {!hasConversation ? (
+            <div className="animate-rise">
+              <p className="text-sm text-ink-2">
+                Ask anything about <strong className="font-semibold text-ink-1">{game.title}</strong>, or start with one of these:
+              </p>
+              <div className="mt-4 grid gap-2 md:grid-cols-2">
+                {suggestedQuestions.map((prompt, index) => (
+                  <button
+                    className="group flex animate-rise items-center justify-between gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-left text-sm text-ink-2 transition duration-150 hover:border-accent/35 hover:bg-accent/[0.05] hover:text-ink-1"
+                    key={prompt}
+                    onClick={() => void ask(prompt)}
+                    style={{ animationDelay: `${index * 40}ms` }}
+                    type="button"
+                  >
+                    {prompt}
+                    <ArrowUp className="h-4 w-4 shrink-0 rotate-45 text-ink-3 transition duration-150 group-hover:text-accent" />
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
           {messages.map((message, index) => (
             <div
+              className={`flex animate-rise ${message.role === "user" ? "justify-end" : "justify-start"}`}
               key={`${message.role}-${index}`}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-7 ${
-                  message.role === "user"
-                    ? "bg-accent text-slate-950"
-                    : "border border-line bg-slate-900/80 text-slate-100"
-                }`}
-              >
-                {message.role === "assistant" ? formatAssistantText(message.text) : message.text}
-              </div>
+              {message.role === "user" ? (
+                <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm font-medium leading-6 text-accent-ink">
+                  {message.text}
+                </div>
+              ) : (
+                <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-line bg-panel px-4 pb-1.5 pt-3 text-sm leading-7 text-ink-2">
+                  <p className="mb-1 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.12em] text-accent">
+                    <Sparkles className="h-3 w-3" /> QuestAI
+                  </p>
+                  <FormattedGuideText text={message.text} />
+                </div>
+              )}
             </div>
           ))}
 
           {isGuideLoading ? (
-            <div className="flex justify-start">
-              <div className="rounded-2xl border border-line bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                  QuestAI is thinking...
+            <div className="flex animate-rise justify-start">
+              <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border border-line bg-panel px-4 py-3 text-sm text-ink-3">
+                <span className="flex gap-1" aria-hidden="true">
+                  {[0, 150, 300].map((delay) => (
+                    <span
+                      className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent"
+                      key={delay}
+                      style={{ animationDelay: `${delay}ms` }}
+                    />
+                  ))}
                 </span>
+                QuestAI is thinking…
               </div>
             </div>
           ) : null}
         </div>
 
-        {guideError ? (
-          <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
-            <div className="flex items-center justify-between gap-4">
-              <span>{guideError}</span>
-              <button
-                className="rounded-md border border-red-400/40 px-2 py-1 text-xs font-semibold text-red-100 hover:bg-red-500/10"
-                onClick={() => setGuideError(null)}
-                type="button"
-              >
-                Dismiss
-              </button>
+        <div className="space-y-3 border-t border-line bg-panel/50 px-5 py-4">
+          {hasConversation ? (
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {suggestedQuestions.map((prompt) => (
+                <button
+                  className="shrink-0 rounded-full border border-line px-3 py-1 text-xs text-ink-3 transition hover:border-accent/35 hover:text-ink-1 disabled:pointer-events-none disabled:opacity-45"
+                  disabled={isGuideLoading}
+                  key={prompt}
+                  onClick={() => void ask(prompt)}
+                  type="button"
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <form className="mt-4 flex gap-3" onSubmit={handleAskGuide}>
-          <textarea
-            className="min-h-[96px] flex-1 rounded-xl border border-line bg-black/20 px-3 py-3 text-sm text-white placeholder:text-slate-500"
-            onChange={(event) => setQuestion(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void handleAskGuide();
-              }
-            }}
-            placeholder="Ask about strategy, mechanics, items, or progression..."
-            value={question}
-          />
-          <Button
-            className="h-fit self-end"
-            disabled={isGuideLoading || !question.trim()}
-            onClick={() => void handleAskGuide()}
-            type="submit"
+          {guideError ? <Notice onDismiss={() => setGuideError(null)}>{guideError}</Notice> : null}
+
+          <form
+            className="flex items-end gap-2 rounded-xl border border-line-strong bg-shell/60 p-2 transition duration-150 focus-within:border-accent/60 focus-within:ring-4 focus-within:ring-accent/10"
+            onSubmit={handleAskGuide}
           >
-            <Send className="h-4 w-4" />
-            {isGuideLoading ? "Sending..." : "Send"}
-          </Button>
-        </form>
+            <label className="sr-only" htmlFor="guide-question">Ask the game guide</label>
+            <textarea
+              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-ink-1 outline-none placeholder:text-ink-3"
+              id="guide-question"
+              onChange={(event) => setQuestion(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleAskGuide();
+                }
+              }}
+              placeholder={`Ask about strategy, mechanics, items, or progression in ${game.title}…`}
+              ref={inputRef}
+              rows={1}
+              value={question}
+            />
+            <Button
+              aria-label="Send question"
+              className="h-10 w-10 !px-0"
+              disabled={isGuideLoading || !question.trim()}
+              type="submit"
+            >
+              {isGuideLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+            </Button>
+          </form>
+          <p className="text-2xs text-ink-3">
+            <kbd className="kbd">Enter</kbd> to send · <kbd className="kbd">Shift</kbd> + <kbd className="kbd">Enter</kbd> for a new line
+          </p>
+        </div>
       </section>
     </div>
   );
