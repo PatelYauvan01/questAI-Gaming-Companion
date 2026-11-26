@@ -1,0 +1,2 @@
+cargo:rustc-link-search=native=D:\SGP-7\questAI\.cargo-check\debug\build\webview2-com-sys-775afe0631030bc7\out\x64
+cargo:rustc-link-lib=advapi32
